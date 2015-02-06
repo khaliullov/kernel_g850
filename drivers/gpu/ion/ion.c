@@ -24,7 +24,6 @@
 #include <linux/kthread.h>
 #include <linux/list.h>
 #include <linux/memblock.h>
-#include <linux/miscdevice.h>
 #include <linux/export.h>
 #include <linux/mm.h>
 #include <linux/mm_types.h>
@@ -43,39 +42,6 @@
 #include <asm/tlbflush.h>
 
 #include "ion_priv.h"
-
-/**
- * struct ion_device - the metadata of the ion device node
- * @dev:		the actual misc device
- * @buffers:		an rb tree of all the existing buffers
- * @buffer_lock:	lock protecting the tree of buffers
- * @lock:		rwsem protecting the tree of heaps and clients
- * @heaps:		list of all the heaps in the system
- * @user_clients:	list of all the clients created from userspace
- */
-struct ion_device {
-	struct miscdevice dev;
-	struct rb_root buffers;
-	struct mutex buffer_lock;
-	struct rw_semaphore lock;
-	struct plist_head heaps;
-	long (*custom_ioctl) (struct ion_client *client, unsigned int cmd,
-			      unsigned long arg);
-	struct rb_root clients;
-	struct dentry *debug_root;
-	struct semaphore vm_sem;
-	atomic_t page_idx;
-	struct vm_struct *reserved_vm_area;
-	pte_t **pte;
-
-#ifdef CONFIG_ION_EXYNOS_STAT_LOG
-	/* event log */
-	struct dentry *buffer_debug_file;
-	struct dentry *event_debug_file;
-	struct ion_eventlog eventlog[ION_EVENT_LOG_MAX];
-	atomic_t event_idx;
-#endif
-};
 
 /**
  * struct ion_client - a process/hw block local address space
@@ -190,17 +156,6 @@ static inline void ION_EVENT_MMAP(struct ion_buffer *buffer, ktime_t begin)
 	data->id = (unsigned long) buffer;
 	data->heap = buffer->heap;
 	data->size = buffer->size;
-}
-
-inline void ION_EVENT_SHRINK(struct ion_device *dev, size_t size)
-{
-	int idx = atomic_inc_return(&dev->event_idx) % ION_EVENT_LOG_MAX;
-	struct ion_eventlog *log = &dev->eventlog[idx];
-
-	log->type = ION_EVENT_TYPE_SHRINK;
-	log->begin = ktime_get();
-	log->done = ktime_set(0, 0);
-	log->data.shrink.size = size;
 }
 
 static struct ion_task *ion_buffer_task_lookup(struct ion_buffer *buffer,

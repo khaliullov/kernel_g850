@@ -179,17 +179,6 @@ void hevc_sched_worker(struct work_struct *work)
 	hevc_try_run(dev);
 }
 
-inline int hevc_clear_hw_bit(struct hevc_ctx *ctx)
-{
-	struct hevc_dev *dev = ctx->dev;
-	int ret = -1;
-
-	if (!atomic_read(&dev->watchdog_run))
-		ret = test_and_clear_bit(ctx->num, &dev->hw_lock);
-
-	return ret;
-}
-
 /* Helper functions for interrupt processing */
 /* Remove from hw execution round robin */
 static inline void clear_work_bit(struct hevc_ctx *ctx)

@@ -608,7 +608,17 @@ struct hevc_fmt {
 };
 
 int hevc_get_framerate(struct timeval *to, struct timeval *from);
-inline int hevc_clear_hw_bit(struct hevc_ctx *ctx);
+
+static inline int hevc_clear_hw_bit(struct hevc_ctx *ctx)
+{
+	struct hevc_dev *dev = ctx->dev;
+	int ret = -1;
+
+	if (!atomic_read(&dev->watchdog_run))
+		ret = test_and_clear_bit(ctx->num, &dev->hw_lock);
+
+	return ret;
+}
 
 #ifdef CONFIG_ION_EXYNOS
 extern struct ion_device *ion_exynos;
