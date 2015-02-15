@@ -1231,9 +1231,9 @@ struct hmp_global_attr {
 };
 
 #ifdef CONFIG_HMP_FREQUENCY_INVARIANT_SCALE
-#define HMP_DATA_SYSFS_MAX 14
+#define HMP_DATA_SYSFS_MAX 17
 #else
-#define HMP_DATA_SYSFS_MAX 13
+#define HMP_DATA_SYSFS_MAX 16
 #endif
 
 struct hmp_data_struct {
@@ -3824,6 +3824,7 @@ static int hmp_boostpulse;
 static int hmp_active_down_migration;
 static int hmp_aggressive_up_migration;
 static int hmp_aggressive_yield;
+static int hmp_fork_migrate_big = 0;
 static DEFINE_RAW_SPINLOCK(hmp_boost_lock);
 static DEFINE_RAW_SPINLOCK(hmp_semiboost_lock);
 static DEFINE_RAW_SPINLOCK(hmp_sysfs_lock);
@@ -4233,6 +4234,26 @@ static int hmp_aggressive_yield_from_sysfs(int value)
 	return ret;
 }
 
+static int hmp_fork_migrate_big_from_sysfs(int value)
+{
+	unsigned long flags;
+	int ret = 0;
+
+	raw_spin_lock_irqsave(&hmp_sysfs_lock, flags);
+	if (value == 1)
+		hmp_fork_migrate_big++;
+	else if (value == 0)
+		if (hmp_fork_migrate_big >= 1)
+			hmp_fork_migrate_big--;
+		else
+			ret = -EINVAL;
+	else
+		ret = -EINVAL;
+	raw_spin_unlock_irqrestore(&hmp_sysfs_lock, flags);
+
+	return ret;
+}
+
 int set_hmp_boost(int enable)
 {
 	return hmp_boost_from_sysfs(enable);
@@ -4274,6 +4295,11 @@ int set_hmp_aggressive_up_migration(int enable)
 int set_hmp_aggressive_yield(int enable)
 {
 	return hmp_aggressive_yield_from_sysfs(enable);
+}
+
+int set_hmp_fork_migrate_big(int enable)
+{
+	return hmp_fork_migrate_big_from_sysfs(enable);
 }
 
 int get_hmp_boost(void)
@@ -4390,6 +4416,11 @@ static int hmp_attr_init(void)
 		NULL,
 		hmp_aggressive_yield_from_sysfs);
 
+	hmp_attr_add("fork_migrate_big",
+		&hmp_fork_migrate_big,
+		NULL,
+		hmp_fork_migrate_big_from_sysfs);		
+		
 #ifdef CONFIG_HMP_FREQUENCY_INVARIANT_SCALE
 	/* default frequency-invariant scaling ON */
 	hmp_data.freqinvar_load_scale_enabled = 1;
@@ -4554,7 +4585,7 @@ select_task_rq_fair(struct task_struct *p, int sd_flag, int wake_flags)
 
 #ifdef CONFIG_SCHED_HMP
 	/* always put non-kernel forking tasks on a big domain */
-	if (p->mm && (sd_flag & SD_BALANCE_FORK)) {
+	if (hmp_fork_migrate_big && p->mm && (sd_flag & SD_BALANCE_FORK)) {
 		new_cpu = hmp_select_faster_cpu(p, prev_cpu);
 		if (new_cpu != NR_CPUS) {
 			hmp_next_up_delay(&p->se, new_cpu);
