@@ -40,7 +40,6 @@ struct dphy_timing_value {
 	u32 lpx;
 	u32 hs_exit;
 	u32 b_dphyctl;
-	u32 m_pllctl;
 };
 
 enum mipi_dsim_interface_type {
@@ -313,9 +312,6 @@ struct mipi_dsim_device {
 #endif
 #ifdef CONFIG_FB_WINDOW_UPDATE
 	struct lcd_win_rect	lcd_win;
-#endif
-#ifdef CONFIG_FB_HIBERNATION_DISPLAY
-	struct decon_lcd	*lcd_update;
 #endif
 	spinlock_t slock;
 	struct mutex lock;

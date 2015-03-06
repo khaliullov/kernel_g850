@@ -217,7 +217,7 @@ static int gather_multi_frame(struct sipc5_link_header *hdr,
 	struct sk_buff_head *multi_q = &iod->sk_multi_q[ctrl.id];
 	int len = skb->len;
 
-#ifdef DEBUG_MODEM_IF
+#ifdef DEBUG_MODEM_IF_LINK_RX
 	/* If there has been no multiple frame with this ID, ... */
 	if (skb_queue_empty(multi_q)) {
 		struct sipc_fmt_hdr *fh = (struct sipc_fmt_hdr *)skb->data;
@@ -328,13 +328,6 @@ static int rx_multi_pdp(struct sk_buff *skb)
 		skb_reset_mac_header(skb);
 		skb_pull(skb, sizeof(struct ethhdr));
 	}
-
-#ifdef DEBUG_MODEM_IF_IP_DATA
-	print_ipv4_packet(skb->data, RX);
-#endif
-#if defined(DEBUG_MODEM_IF_IODEV_RX) && defined(DEBUG_MODEM_IF_PS_DATA)
-	log_ipc_pkt(iod->id, IODEV, RX, skb, NULL);
-#endif
 
 	if (in_interrupt())
 		ret = netif_rx(skb);
@@ -1337,14 +1330,6 @@ static ssize_t misc_write(struct file *filp, const char __user *data,
 	unsigned int headroom;
 	unsigned int tailroom;
 	unsigned int tx_bytes;
-#ifdef DEBUG_MODEM_IF
-	struct timespec ts;
-#endif
-
-#ifdef DEBUG_MODEM_IF
-	/* Record the timestamp */
-	getnstimeofday(&ts);
-#endif
 
 	if (iod->format <= IPC_RFS && iod->id == 0)
 		return -EINVAL;
@@ -1377,18 +1362,6 @@ static ssize_t misc_write(struct file *filp, const char __user *data,
 		return -ENOMEM;
 	}
 
-	/* Reserve the space for a link header */
-	skb_reserve(skb, headroom);
-
-	/* Copy an IPC message from the user space to the skb */
-	buff = skb_put(skb, count);
-	if (copy_from_user(buff, data, count)) {
-		mif_err("%s->%s: ERR! copy_from_user fail (count %d)\n",
-			iod->name, ld->name, count);
-		dev_kfree_skb_any(skb);
-		return -EFAULT;
-	}
-
 	/* Store the IO device, the link device, etc. */
 	skbpriv(skb)->iod = iod;
 	skbpriv(skb)->ld = ld;
@@ -1397,29 +1370,38 @@ static ssize_t misc_write(struct file *filp, const char __user *data,
 	skbpriv(skb)->sipc_ch = iod->id;
 
 #ifdef DEBUG_MODEM_IF
-	/* Copy the timestamp to the skb */
-	memcpy(&skbpriv(skb)->ts, &ts, sizeof(struct timespec));
-#endif
-#ifdef DEBUG_MODEM_IF_IODEV_TX
-	log_ipc_pkt(iod->id, IODEV, TX, skb, NULL);
+	/* Record the time-stamp */
+	getnstimeofday(&skbpriv(skb)->ts);
 #endif
 
 	/* Build SIPC5 link header*/
 	if (cfg) {
-		buff = skb_push(skb, headroom);
+		buff = skb_put(skb, headroom);
 		sipc5_build_header(iod, ld, buff, cfg, 0, count);
 	}
+
+	/* Store IPC message */
+	buff = skb_put(skb, count);
+	if (copy_from_user(buff, data, count)) {
+		mif_err("%s->%s: ERR! copy_from_user fail (count %d)\n",
+			iod->name, ld->name, count);
+		dev_kfree_skb_any(skb);
+		return -EFAULT;
+	}
+
+#ifdef DEBUG_MODEM_IF_IODEV_TX
+	log_ipc_pkt(iod->id, IODEV, TX, skb, iod->link_header ? buff : NULL);
+#endif
+	trace_mif_event(skb, tx_bytes, CALLEE);
 
 	/* Apply padding */
 	if (tailroom)
 		skb_put(skb, tailroom);
 
 	/**
-	 * Send the skb with a link device
+	 * send data with sk_buff, link device will put sk_buff
+	 * into the specific sk_buff_q and run work-q to send data
 	 */
-#ifdef DEBUG_MODEM_IF
-	trace_mif_event(skb, tx_bytes, FUNC);
-#endif
 	ret = ld->send(ld, iod, skb);
 	if (ret < 0) {
 		mif_err("%s->%s: ERR! %s->send fail:%d (tx_bytes:%d len:%d)\n",
@@ -1556,14 +1538,6 @@ static int vnet_xmit(struct sk_buff *skb, struct net_device *ndev)
 	unsigned int headroom;
 	unsigned int tailroom;
 	unsigned int tx_bytes;
-#ifdef DEBUG_MODEM_IF
-	struct timespec ts;
-#endif
-
-#ifdef DEBUG_MODEM_IF
-	/* Record the timestamp */
-	getnstimeofday(&ts);
-#endif
 
 	if (unlikely(!cp_online(mc))) {
 		if (!netif_queue_stopped(ndev))
@@ -1606,21 +1580,6 @@ static int vnet_xmit(struct sk_buff *skb, struct net_device *ndev)
 		}
 	}
 
-	/* Store the IO device, the link device, etc. */
-	skbpriv(skb_new)->iod = iod;
-	skbpriv(skb_new)->ld = ld;
-
-	skbpriv(skb_new)->lnk_hdr = iod->link_header;
-	skbpriv(skb_new)->sipc_ch = iod->id;
-
-#ifdef DEBUG_MODEM_IF
-	/* Copy the timestamp to the skb */
-	memcpy(&skbpriv(skb_new)->ts, &ts, sizeof(struct timespec));
-#endif
-#if defined(DEBUG_MODEM_IF_IODEV_TX) && defined(DEBUG_MODEM_IF_PS_DATA)
-	log_ipc_pkt(iod->id, IODEV, TX, skb_new, NULL);
-#endif
-
 	/* Build SIPC5 link header*/
 	buff = skb_push(skb_new, headroom);
 	if (cfg)
@@ -1638,6 +1597,21 @@ static int vnet_xmit(struct sk_buff *skb, struct net_device *ndev)
 	/* Apply padding */
 	if (tailroom)
 		skb_put(skb_new, tailroom);
+
+	/* Store the IO device, the link device, etc. */
+	skbpriv(skb_new)->iod = iod;
+	skbpriv(skb_new)->ld = ld;
+
+	skbpriv(skb_new)->lnk_hdr = iod->link_header;
+	skbpriv(skb_new)->sipc_ch = iod->id;
+
+#ifdef DEBUG_MODEM_IF
+	/* Record the time-stamp */
+	getnstimeofday(&skbpriv(skb)->ts);
+#endif
+#ifdef DEBUG_MODEM_IF_IODEV_TX
+	log_ipc_pkt(iod->id, IODEV, TX, skb, iod->link_header ? buff : NULL);
+#endif
 
 	ret = ld->send(ld, iod, skb_new);
 	if (unlikely(ret < 0)) {

@@ -242,7 +242,6 @@ struct s5p_mfc_buf {
 	} planes;
 	int used;
 	int already;
-	int consumed;
 };
 
 #define vb_to_mfc_buf(x)	\

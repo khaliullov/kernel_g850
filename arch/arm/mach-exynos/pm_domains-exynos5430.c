@@ -132,6 +132,7 @@ static struct sleep_save exynos_pd_maudio_clk_save[] = {
 	SAVE_ITEM(EXYNOS5430_ENABLE_IP_AUD1),
 };
 
+
 static int exynos_pd_maudio_power_on_pre(struct exynos_pm_domain *pd)
 {
 #if defined(EXYNOS5430_CLK_SRC_GATING)
@@ -748,7 +749,7 @@ static struct sleep_save exynos_pd_cam1_clk_save[] = {
  */
 static int exynos_pd_cam1_power_on_pre(struct exynos_pm_domain *pd)
 {
-	pr_info(PM_DOMAIN_PREFIX "%s is preparing power-on sequence.\n", pd->name);
+	DEBUG_PRINT_INFO("%s is preparing power-on sequence.\n", pd->name);
 	exynos5_pd_enable_clk(cmutop_cam1, ARRAY_SIZE(cmutop_cam1));
 	return 0;
 }

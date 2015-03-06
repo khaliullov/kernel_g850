@@ -66,7 +66,8 @@ static void sec_power_off(void)
 	while (1) {
 		/* Check reboot charging */
 		if ((ac_val.intval || usb_val.intval || wc_val.intval ||
-		     (poweroff_try >= 5))) {
+		     (poweroff_try >= 5)) &&
+		     !lpcharge) {
 
 			pr_emerg("%s: charger connected() or power"
 			     "off failed(%d), reboot!\n",

@@ -272,8 +272,12 @@ struct mst_buff *mem_take_snapshot(struct mem_link_device *mld,
 {
 	struct mst_buff *msb = msb_alloc();
 
-	if (!msb)
+	if (!msb) {
+#ifdef DEBUG_MODEM_IF
+		panic("mif: mem_take_snapshot: kmem_cache_zalloc() fail\n");
+#endif
 		return NULL;
+	}
 
 #ifdef CONFIG_LINK_DEVICE_WITH_SBD_ARCH
 	if (sbd_active(&mld->sbd_link_dev))
