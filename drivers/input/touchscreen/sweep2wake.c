@@ -56,7 +56,7 @@
 
 /* Screen size */
 #define DEFAULT_S2W_Y_MAX               1280
-#define DEFAULT_S2W_Y_LIMIT             DEFAULT_S2W_Y_MAX
+#define DEFAULT_S2W_Y_LIMIT             DEFAULT_S2W_Y_MAX-130
 #define DEFAULT_S2W_X_MAX		720
 
 /* 0
@@ -156,7 +156,7 @@ static void detect_sweep2wake(int sweep_coord, int sweep_height, bool st)
 			(single_touch) ? "true" : "false");
 #endif
 	/* s2s: right->left */
-	if ((single_touch) && (scr_suspended == false) && (s2w_switch > 0)) {
+	if ((single_touch) && (s2w_switch > 0)) {
 		scr_on_touch = true;
 		prev_coord = DEFAULT_S2W_X_B5;
 		next_coord = DEFAULT_S2W_X_B2;
