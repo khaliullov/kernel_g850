@@ -473,6 +473,13 @@ static void ion_buffer_remove_from_handle(struct ion_buffer *buffer)
 	mutex_unlock(&buffer->lock);
 }
 
+static bool ion_handle_validate(struct ion_client *client,
+				struct ion_handle *handle)
+{
+	WARN_ON(!mutex_is_locked(&client->lock));
+	return (idr_find(&client->idr, handle->id) == handle);
+}
+
 static struct ion_handle *ion_handle_create(struct ion_client *client,
 				     struct ion_buffer *buffer)
 {
@@ -524,12 +531,20 @@ static void ion_handle_get(struct ion_handle *handle)
 	kref_get(&handle->ref);
 }
 
-static int ion_handle_put(struct ion_handle *handle)
+static int ion_handle_put(struct ion_client *client, struct ion_handle *handle)
 {
-	struct ion_client *client = handle->client;
+	bool valid_handle;
 	int ret;
 
 	mutex_lock(&client->lock);
+	valid_handle = ion_handle_validate(client, handle);
+
+	if (!valid_handle) {
+		WARN(1, "%s: invalid handle passed to free.\n", __func__);
+		mutex_unlock(&client->lock);
+		return -EINVAL;
+	}
+
 	ret = kref_put(&handle->ref, ion_handle_destroy);
 	mutex_unlock(&client->lock);
 
@@ -565,13 +580,6 @@ static struct ion_handle *ion_handle_get_by_id(struct ion_client *client,
 	mutex_unlock(&client->lock);
 
 	return handle ? handle : ERR_PTR(-EINVAL);
-}
-
-static bool ion_handle_validate(struct ion_client *client,
-				struct ion_handle *handle)
-{
-	WARN_ON(!mutex_is_locked(&client->lock));
-	return (idr_find(&client->idr, handle->id) == handle);
 }
 
 static int ion_handle_add(struct ion_client *client, struct ion_handle *handle)
@@ -629,6 +637,9 @@ struct ion_handle *ion_alloc(struct ion_client *client, size_t len,
 	if (WARN_ON(!len))
 		return ERR_PTR(-EINVAL);
 
+	if (WARN_ON(len > SZ_512M))
+		return ERR_PTR(-ENOMEM);
+
 	down_read(&dev->lock);
 	plist_for_each_entry(heap, &dev->heaps, node) {
 		/* if the caller didn't specify this heap id */
@@ -661,7 +672,7 @@ struct ion_handle *ion_alloc(struct ion_client *client, size_t len,
 	ret = ion_handle_add(client, handle);
 	mutex_unlock(&client->lock);
 	if (ret) {
-		ion_handle_put(handle);
+		ion_handle_put(client, handle);
 		handle = ERR_PTR(ret);
 	}
 
@@ -686,7 +697,7 @@ void ion_free(struct ion_client *client, struct ion_handle *handle)
 		return;
 	}
 	mutex_unlock(&client->lock);
-	ion_handle_put(handle);
+	ion_handle_put(client, handle);
 }
 EXPORT_SYMBOL(ion_free);
 
@@ -1304,7 +1315,7 @@ struct ion_handle *ion_import_dma_buf(struct ion_client *client, int fd)
 	ret = ion_handle_add(client, handle);
 	mutex_unlock(&client->lock);
 	if (ret) {
-		ion_handle_put(handle);
+		ion_handle_put(client, handle);
 		handle = ERR_PTR(ret);
 	}
 end:
@@ -1424,28 +1435,20 @@ static long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	{
 		struct ion_handle_data data;
 		struct ion_handle *handle;
-		bool valid;
 
 		if (copy_from_user(&data, (void __user *)arg,
 				   sizeof(struct ion_handle_data)))
 			return -EFAULT;
 		handle = ion_handle_get_by_id(client, (int)data.handle);
-		if (IS_ERR(handle))
+		if (IS_ERR(handle)) {
+			pr_debug("%s: failed to get a valid ion handle "
+					"(pid=%d, uhandle=%d)\n", __func__,
+					client->pid, (int)data.handle);
 			return PTR_ERR(handle);
+		}
+
 		ion_free(client, handle);
-		WARN((atomic_read(&handle->ref.refcount) <= 0) ||
-			(handle->client != client),
-			"%s: Unbalenced handle count: %d, client %p:%p\n",
-			__func__, atomic_read(&handle->ref.refcount),
-			handle->client, client);
-		mutex_lock(&client->lock);
-		valid = ion_handle_validate(client, handle);
-		mutex_unlock(&client->lock);
-		WARN(!valid, "%s: invalid handle %p after ion_free\n",
-			__func__, handle);
-		if ((atomic_read(&handle->ref.refcount) > 0) &&
-			(handle->client == client) && valid)
-			ion_handle_put(handle);
+		ion_handle_put(client, handle);
 		break;
 	}
 	case ION_IOC_SHARE:
@@ -1460,7 +1463,7 @@ static long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		if (IS_ERR(handle))
 			return PTR_ERR(handle);
 		data.fd = ion_share_dma_buf_fd(client, handle);
-		ion_handle_put(handle);
+		ion_handle_put(client, handle);
 		if (copy_to_user((void __user *)arg, &data, sizeof(data)))
 			return -EFAULT;
 		if (data.fd < 0)
